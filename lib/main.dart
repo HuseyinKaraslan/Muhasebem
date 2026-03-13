@@ -149,12 +149,15 @@ class HomeShellPage extends StatefulWidget {
 }
 
 class _HomeShellPageState extends State<HomeShellPage> {
-  int _currentIndex = 0;
+  int _currentIndex = 2; // Home ortada
   int _stocksRefreshKey = 0;
   int _productsRefreshKey = 0;
   int _salesRefreshKey = 0;
+  int _expensesRefreshKey = 0;
 
   List<Widget> get _pages => [
+        ProductsPage(key: ValueKey(_productsRefreshKey)),
+        StocksPage(key: ValueKey(_stocksRefreshKey)),
         OverviewPage(
           onGoToStocks: () {
             setState(() {
@@ -167,21 +170,22 @@ class _HomeShellPageState extends State<HomeShellPage> {
             });
           },
         ),
-        StocksPage(key: ValueKey(_stocksRefreshKey)),
-        ProductsPage(key: ValueKey(_productsRefreshKey)),
         SalesPage(key: ValueKey(_salesRefreshKey)),
+        ExpensesPage(key: ValueKey(_expensesRefreshKey)),
       ];
 
   String get _title {
     switch (_currentIndex) {
       case 0:
-        return 'Genel Bakış';
+        return 'Ürünler';
       case 1:
         return 'Stoklar';
       case 2:
-        return 'Ürünler';
+        return 'Home';
       case 3:
         return 'Satışlar';
+      case 4:
+        return 'Ek giderler';
       default:
         return 'Hafif Muhasebe';
     }
@@ -206,11 +210,11 @@ class _HomeShellPageState extends State<HomeShellPage> {
             _currentIndex = index;
           });
         },
-        destinations: const [
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'Özet',
+            icon: const Icon(Icons.category_outlined),
+            selectedIcon: const Icon(Icons.category),
+            label: 'Ürünler',
           ),
           NavigationDestination(
             icon: Icon(Icons.inventory_2_outlined),
@@ -218,14 +222,19 @@ class _HomeShellPageState extends State<HomeShellPage> {
             label: 'Stoklar',
           ),
           NavigationDestination(
-            icon: Icon(Icons.category_outlined),
-            selectedIcon: Icon(Icons.category),
-            label: 'Ürünler',
+            icon: _HomeNavIcon(selected: false),
+            selectedIcon: _HomeNavIcon(selected: true),
+            label: 'Home',
           ),
           NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),
             label: 'Satışlar',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.payments_outlined),
+            selectedIcon: Icon(Icons.payments),
+            label: 'Giderler',
           ),
         ],
       ),
@@ -249,7 +258,7 @@ class _HomeShellPageState extends State<HomeShellPage> {
           icon: const Icon(Icons.add),
           label: const Text('Yeni stok'),
         );
-      case 2:
+      case 0:
         return FloatingActionButton.extended(
           onPressed: () async {
             final added = await showDialog<bool>(
@@ -280,9 +289,66 @@ class _HomeShellPageState extends State<HomeShellPage> {
           icon: const Icon(Icons.add),
           label: const Text('Yeni satış'),
         );
+      case 4:
+        return FloatingActionButton.extended(
+          onPressed: () async {
+            final added = await showDialog<bool>(
+              context: context,
+              builder: (context) => const GiderEkleDialog(),
+            );
+            if (added == true && mounted) {
+              setState(() => _expensesRefreshKey++);
+            }
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Gider ekle'),
+        );
       default:
         return null;
     }
+  }
+}
+
+class _HomeNavIcon extends StatelessWidget {
+  const _HomeNavIcon({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final bg = scheme.primary;
+    final fg = scheme.onPrimary;
+
+    return Container(
+      width: 54,
+      height: 54,
+      decoration: BoxDecoration(
+        color: bg,
+        shape: BoxShape.circle,
+        boxShadow: [
+          // Yumuşak taban gölgesi
+          BoxShadow(
+            color: Colors.black.withOpacity(0.20),
+            blurRadius: 18,
+            spreadRadius: 2,
+            offset: const Offset(0, 10),
+          ),
+          // Seçiliyken ekstra vurgu
+          if (selected)
+            BoxShadow(
+              color: Colors.black.withOpacity(0.30),
+              blurRadius: 26,
+              offset: const Offset(0, 14),
+            ),
+        ],
+      ),
+      child: Icon(
+        selected ? Icons.home_rounded : Icons.home_outlined,
+        color: fg,
+        size: 26,
+      ),
+    );
   }
 }
 
@@ -952,7 +1018,7 @@ class _SatisOlusturDialogState extends State<SatisOlusturDialog> {
   }
 }
 
-class OverviewPage extends StatelessWidget {
+class OverviewPage extends StatefulWidget {
   const OverviewPage({
     super.key,
     required this.onGoToStocks,
@@ -961,6 +1027,29 @@ class OverviewPage extends StatelessWidget {
 
   final VoidCallback onGoToStocks;
   final VoidCallback onGoToSales;
+
+  @override
+  State<OverviewPage> createState() => _OverviewPageState();
+}
+
+class _OverviewPageState extends State<OverviewPage> {
+  late Future<List<({DateTime day, double total})>> _last30DaysFuture;
+  late Future<
+      ({
+        double totalStock,
+        double totalExpenses,
+        double todaySales,
+        double weekSales,
+        double monthSales,
+        int productCount
+      })> _overviewFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _last30DaysFuture = _fetchLast30DaysSales();
+    _overviewFuture = _fetchOverview();
+  }
 
   Future<List<({DateTime day, double total})>> _fetchLast30DaysSales() async {
     final now = DateTime.now().toUtc();
@@ -1000,6 +1089,7 @@ class OverviewPage extends StatelessWidget {
   Future<
       ({
         double totalStock,
+        double totalExpenses,
         double todaySales,
         double weekSales,
         double monthSales,
@@ -1054,11 +1144,25 @@ class OverviewPage extends StatelessWidget {
       monthSales += (row['satis_kazanilan'] ?? 0).toDouble();
     }
 
+    // Ek giderler toplamı
+    double totalExpenses = 0;
+    try {
+      final expenses = await supabase
+          .from('ek_giderler')
+          .select('tutar');
+      for (final row in List<Map<String, dynamic>>.from(expenses)) {
+        totalExpenses += (row['tutar'] ?? 0).toDouble();
+      }
+    } catch (_) {
+      totalExpenses = 0;
+    }
+
     final urunlerList = await supabase.from('urunler').select('id');
     final productCount = (urunlerList as List).length;
 
     return (
       totalStock: totalStock,
+      totalExpenses: totalExpenses,
       todaySales: todaySales,
       weekSales: weekSales,
       monthSales: monthSales,
@@ -1089,7 +1193,7 @@ class OverviewPage extends StatelessWidget {
                       Expanded(
                         child: FutureBuilder<
                             List<({DateTime day, double total})>>(
-                          future: _fetchLast30DaysSales(),
+                          future: _last30DaysFuture,
                           builder: (context, snapshot) {
                             if (snapshot.connectionState ==
                                 ConnectionState.waiting) {
@@ -1116,16 +1220,33 @@ class OverviewPage extends StatelessWidget {
                             }
 
                             final spots = <FlSpot>[];
-                            double maxY = 0;
                             for (int i = 0; i < data.length; i++) {
                               final v = data[i].total;
                               spots.add(FlSpot(i.toDouble(), v));
-                              if (v > maxY) maxY = v;
                             }
-                            if (maxY == 0) maxY = 1;
+
+                            final theme = Theme.of(context);
 
                             return LineChart(
                               LineChartData(
+                                lineTouchData: LineTouchData(
+                                  touchTooltipData: LineTouchTooltipData(
+                                    getTooltipItems: (touchedSpots) {
+                                      return touchedSpots.map((spot) {
+                                        final value =
+                                            spot.y.clamp(0, 100000).toDouble();
+                                        return LineTooltipItem(
+                                          '₺ ${value.toStringAsFixed(0)}',
+                                          theme.textTheme.bodySmall!.copyWith(
+                                            color:
+                                                theme.colorScheme.onSurface,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        );
+                                      }).toList();
+                                    },
+                                  ),
+                                ),
                                 gridData: FlGridData(show: true),
                                 borderData: FlBorderData(
                                   show: true,
@@ -1140,8 +1261,30 @@ class OverviewPage extends StatelessWidget {
                                   leftTitles: AxisTitles(
                                     sideTitles: SideTitles(
                                       showTitles: true,
-                                      reservedSize: 40,
-                                      interval: maxY / 4,
+                                      reservedSize: 48,
+                                      getTitlesWidget: (value, meta) {
+                                        String? label;
+                                        if (value == 10000) {
+                                          label = '10K';
+                                        } else if (value == 30000) {
+                                          label = '30K';
+                                        } else if (value == 50000) {
+                                          label = '50K';
+                                        } else if (value == 70000) {
+                                          label = '70K';
+                                        } else if (value == 100000) {
+                                          label = '100K';
+                                        }
+                                        if (label == null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Text(
+                                          label,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelSmall,
+                                        );
+                                      },
                                     ),
                                   ),
                                   rightTitles: const AxisTitles(
@@ -1189,7 +1332,7 @@ class OverviewPage extends StatelessWidget {
                                 minX: 0,
                                 maxX: (data.length - 1).toDouble(),
                                 minY: 0,
-                                maxY: maxY,
+                                maxY: 100000,
                               ),
                             );
                           },
@@ -1219,12 +1362,13 @@ class OverviewPage extends StatelessWidget {
             FutureBuilder<
                 ({
                   double totalStock,
+                  double totalExpenses,
                   double todaySales,
                   double weekSales,
                   double monthSales,
                   int productCount
                 })>(
-              future: _fetchOverview(),
+              future: _overviewFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Padding(
@@ -1244,6 +1388,7 @@ class OverviewPage extends StatelessWidget {
                 final o = snapshot.data ??
                     (
                       totalStock: 0.0,
+                      totalExpenses: 0.0,
                       todaySales: 0.0,
                       weekSales: 0.0,
                       monthSales: 0.0,
@@ -1256,6 +1401,11 @@ class OverviewPage extends StatelessWidget {
                     _StatCard(
                       title: 'Toplam stok maliyeti',
                       value: '₺ ${o.totalStock.toStringAsFixed(2)}',
+                      subtitle: '',
+                    ),
+                    _StatCard(
+                      title: 'Toplam ek giderler',
+                      value: '₺ ${o.totalExpenses.toStringAsFixed(2)}',
                       subtitle: '',
                     ),
                     _StatCard(
@@ -1293,12 +1443,12 @@ class OverviewPage extends StatelessWidget {
               runSpacing: 12,
               children: [
                 FilledButton.icon(
-                  onPressed: onGoToStocks,
+                  onPressed: widget.onGoToStocks,
                   icon: const Icon(Icons.inventory_2_outlined),
                   label: const Text('Stok ekle'),
                 ),
                 FilledButton.icon(
-                  onPressed: onGoToSales,
+                  onPressed: widget.onGoToSales,
                   icon: const Icon(Icons.receipt_long_outlined),
                   label: const Text('Satış ekle'),
                 ),
@@ -1393,6 +1543,9 @@ class _StatCard extends StatelessWidget {
                 value,
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
+                  color: (title.contains('stok') || title.contains('gider'))
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurface,
                 ),
               ),
               if (subtitle.isNotEmpty) ...[
@@ -1420,8 +1573,24 @@ class StocksPage extends StatefulWidget {
 }
 
 class _StocksPageState extends State<StocksPage> {
+  late Future<List<Map<String, dynamic>>> _stocksFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _stocksFuture = _fetchStocks();
+  }
+
+  void _reloadStocks() {
+    setState(() {
+      _stocksFuture = _fetchStocks();
+    });
+  }
+
   Future<List<Map<String, dynamic>>> _fetchStocks() async {
-    final response = await supabase.from('stok').select();
+    final response = await supabase
+        .from('stok')
+        .select('id, stok_adi, stok_hacim_gr, stok_adet, stok_maliyet');
     return List<Map<String, dynamic>>.from(response);
   }
 
@@ -1463,7 +1632,7 @@ class _StocksPageState extends State<StocksPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('"$name" stoğu silindi.')),
       );
-      setState(() {});
+      _reloadStocks();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1630,7 +1799,7 @@ class _StocksPageState extends State<StocksPage> {
             const SizedBox(height: 12),
             Expanded(
               child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: _fetchStocks(),
+                future: _stocksFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -1720,8 +1889,23 @@ class ProductsPage extends StatefulWidget {
 
 class _ProductsPageState extends State<ProductsPage> {
 
+  late Future<List<Map<String, dynamic>>> _productsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _productsFuture = _fetchProductsWithRecipe();
+  }
+
+  void _reloadProducts() {
+    setState(() {
+      _productsFuture = _fetchProductsWithRecipe();
+    });
+  }
+
   Future<List<Map<String, dynamic>>> _fetchProductsWithRecipe() async {
-    final products = await supabase.from('urunler').select();
+    final products =
+        await supabase.from('urunler').select('id, urun_adi');
     final recipeRows = await supabase
         .from('urun_stok')
         .select('urun_id, kullanilan_miktar_gr, stok(stok_adi, stok_hacim_gr, stok_maliyet)');
@@ -1806,18 +1990,16 @@ class _ProductsPageState extends State<ProductsPage> {
     if (confirm != true) return;
 
     try {
-      // Önce bu ürüne bağlı satış kayıtlarını sil
-      await supabase.from('gecmis_satis').delete().eq('urun_id', urunId);
-      // Sonra reçete satırlarını sil
+      // Önce reçete satırlarını sil
       await supabase.from('urun_stok').delete().eq('urun_id', urunId);
-      // En son ürünü sil
+      // Sonra ürünü sil
       await supabase.from('urunler').delete().eq('id', urunId);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('"$urunAdi" silindi.')),
       );
-      setState(() {});
+      _reloadProducts();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1841,7 +2023,7 @@ class _ProductsPageState extends State<ProductsPage> {
             const SizedBox(height: 12),
             Expanded(
               child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: _fetchProductsWithRecipe(),
+                future: _productsFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -1939,6 +2121,232 @@ class _ProductsPageState extends State<ProductsPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class ExpensesPage extends StatefulWidget {
+  const ExpensesPage({super.key});
+
+  @override
+  State<ExpensesPage> createState() => _ExpensesPageState();
+}
+
+class _ExpensesPageState extends State<ExpensesPage> {
+  late Future<List<Map<String, dynamic>>> _expensesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _expensesFuture = _fetchExpenses();
+  }
+
+  void _reloadExpenses() {
+    setState(() {
+      _expensesFuture = _fetchExpenses();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchExpenses() async {
+    final response = await supabase
+        .from('ek_giderler')
+        .select('id, aciklama, tutar, tarih')
+        .order('tarih', ascending: false);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  static String _formatDate(String? iso) {
+    if (iso == null || iso.isEmpty) return '—';
+    try {
+      final dt = DateTime.parse(iso);
+      return '${dt.day.toString().padLeft(2, '0')}.'
+          '${dt.month.toString().padLeft(2, '0')}.'
+          '${dt.year}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ek giderler',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: _expensesFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Hata: ${snapshot.error}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    );
+                  }
+
+                  final data = snapshot.data ?? [];
+                  if (data.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'Henüz gider yok.\nAlttaki “Gider ekle” ile ekleyebilirsin.',
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    itemCount: data.length,
+                    itemBuilder: (context, index) {
+                      final row = data[index];
+                      final aciklama =
+                          row['aciklama'] as String? ?? 'Gider';
+                      final tutar = (row['tutar'] ?? 0).toDouble();
+                      final tarih = _formatDate(row['tarih'] as String?);
+
+                      return Card(
+                        child: ListTile(
+                          title: Text(aciklama),
+                          subtitle: Text(tarih),
+                          trailing: Text(
+                            '₺ ${tutar.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class GiderEkleDialog extends StatefulWidget {
+  const GiderEkleDialog({super.key});
+
+  @override
+  State<GiderEkleDialog> createState() => _GiderEkleDialogState();
+}
+
+class _GiderEkleDialogState extends State<GiderEkleDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _aciklamaController = TextEditingController();
+  final _tutarController = TextEditingController(text: '0');
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _aciklamaController.dispose();
+    _tutarController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _kaydet() async {
+    if (_saving) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _saving = true);
+    try {
+      final aciklama = _aciklamaController.text.trim();
+      final tutar = double.tryParse(_tutarController.text.trim()) ?? 0;
+      final tarih = DateTime.now().toUtc().toIso8601String();
+
+      await supabase.from('ek_giderler').insert({
+        'aciklama': aciklama,
+        'tutar': tutar,
+        'tarih': tarih,
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gider eklendi.')),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gider eklenemedi: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Gider ekle'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _aciklamaController,
+              decoration: const InputDecoration(
+                labelText: 'Açıklama',
+                hintText: 'Örn: Kira, elektrik',
+              ),
+              textCapitalization: TextCapitalization.sentences,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Açıklama gerekli' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _tutarController,
+              decoration: const InputDecoration(
+                labelText: 'Tutar (₺)',
+              ),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) {
+                final n = double.tryParse((v ?? '').trim());
+                if (n == null) return 'Geçerli tutar gir';
+                if (n <= 0) return 'Tutar 0’dan büyük olmalı';
+                return null;
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+          child: const Text('İptal'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _kaydet,
+          child: _saving
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Kaydet'),
+        ),
+      ],
     );
   }
 }
